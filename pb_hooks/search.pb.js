@@ -74,23 +74,54 @@ routerAdd("GET", "/api/explorer/search/{networkId}", (e) => {
 
             // Build lookup map for feeds
             feedsData.forEach((feed) => {
-                factFeeds[feed.id] = dbUtils.buildFeedObject({
+                // Build base asset object - only create if ba_id exists (not null)
+                const baseAsset =
+                    feed.base_asset && feed.ba_id
+                        ? {
+                              id: feed.ba_id,
+                              ticker: feed.ba_ticker,
+                              name: feed.ba_name,
+                              type: feed.ba_type,
+                              website: feed.ba_website,
+                              fingerprint: feed.ba_fingerprint,
+                              image_path: feed.ba_image_path,
+                              background_color: feed.ba_background_color,
+                          }
+                        : undefined;
+
+                // Build quote asset object - only create if qa_id exists (not null)
+                const quoteAsset =
+                    feed.quote_asset && feed.qa_id
+                        ? {
+                              id: feed.qa_id,
+                              ticker: feed.qa_ticker,
+                              name: feed.qa_name,
+                              type: feed.qa_type,
+                              website: feed.qa_website,
+                              fingerprint: feed.qa_fingerprint,
+                              image_path: feed.qa_image_path,
+                              background_color: feed.qa_background_color,
+                          }
+                        : undefined;
+
+                // Build feed object manually (similar to other endpoints)
+                factFeeds[feed.id] = {
                     id: feed.id,
-                    get: (field) => feed[field],
-                    expandedOne: (relation) => {
-                        if (relation === "base_asset" && feed.base_asset) {
-                            return {
-                                get: (field) => feed[`ba_${field}`],
-                            };
-                        }
-                        if (relation === "quote_asset" && feed.quote_asset) {
-                            return {
-                                get: (field) => feed[`qa_${field}`],
-                            };
-                        }
-                        return null;
-                    },
-                });
+                    feed_id: feed.feed_id,
+                    network: feed.network,
+                    type: feed.type,
+                    name: feed.name,
+                    version: feed.version,
+                    status: feed.status,
+                    inactive_reason: feed.inactive_reason,
+                    source_type: feed.source_type,
+                    funding_type: feed.funding_type,
+                    calculation_method: feed.calculation_method,
+                    heartbeat_interval: feed.heartbeat_interval,
+                    deviation: feed.deviation,
+                    base_asset: baseAsset,
+                    quote_asset: quoteAsset,
+                };
             });
         }
 
@@ -162,19 +193,35 @@ routerAdd("GET", "/api/explorer/search/{networkId}", (e) => {
 
         // Build feeds results
         results.feeds = searchFeeds.map((feed) => {
-            // Build base asset object
-            const baseAsset = feed.base_asset
-                ? dbUtils.buildAssetObject({
-                      get: (field) => feed[`ba_${field}`],
-                  })
-                : null;
+            // Build base asset object - only create if ba_id exists (not null)
+            const baseAsset =
+                feed.base_asset && feed.ba_id
+                    ? {
+                          id: feed.ba_id,
+                          ticker: feed.ba_ticker,
+                          name: feed.ba_name,
+                          type: feed.ba_type,
+                          website: feed.ba_website,
+                          fingerprint: feed.ba_fingerprint,
+                          image_path: feed.ba_image_path,
+                          background_color: feed.ba_background_color,
+                      }
+                    : null;
 
-            // Build quote asset object
-            const quoteAsset = feed.quote_asset
-                ? dbUtils.buildAssetObject({
-                      get: (field) => feed[`qa_${field}`],
-                  })
-                : null;
+            // Build quote asset object - only create if qa_id exists (not null)
+            const quoteAsset =
+                feed.quote_asset && feed.qa_id
+                    ? {
+                          id: feed.qa_id,
+                          ticker: feed.qa_ticker,
+                          name: feed.qa_name,
+                          type: feed.qa_type,
+                          website: feed.qa_website,
+                          fingerprint: feed.qa_fingerprint,
+                          image_path: feed.qa_image_path,
+                          background_color: feed.qa_background_color,
+                      }
+                    : null;
 
             return {
                 id: feed.id,
