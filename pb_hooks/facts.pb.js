@@ -218,7 +218,7 @@ routerAdd("GET", "/api/explorer/facts/{networkId}", (e) => {
 
 // Custom API endpoint for getting a specific fact by URN
 routerAdd("GET", "/api/explorer/facts/{networkId}/{factUrn}", (e) => {
-    const { dbUtils } = require(`${__hooks}/utils.pb.js`);
+    const { FactWithJoinedFeedModel, NodeModel } = require(`${__hooks}/models.pb.js`);
     const networkId = e.request.pathValue("networkId");
     const factUrn = e.request.pathValue("factUrn");
     const feedId = e.request.url.query().get("feedId");
