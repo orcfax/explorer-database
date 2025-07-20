@@ -1,7 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 // Custom API endpoint for sources with metadata
-routerAdd("GET", "/api/explorer/sources/{networkId}", (e) => {
+routerAdd("GET", "/api/explorer/sources-with-metadata/{networkId}", (e) => {
     const { dbUtils } = require(`${__hooks}/utils.pb.js`);
     const networkId = e.request.pathValue("networkId");
 
@@ -66,6 +66,27 @@ routerAdd("GET", "/api/explorer/sources/{networkId}", (e) => {
         }
 
         return e.json(200, sourcesWithMetadata);
+    } catch (error) {
+        console.log("Sources API error:", error);
+        return e.json(500, { error: "Failed to fetch sources data" });
+    }
+});
+
+// Create another router that just fetches the sources and doesn't get the count or latest fact
+routerAdd("GET", "/api/explorer/sources/{networkId}", (e) => {
+    const networkId = e.request.pathValue("networkId");
+
+    try {
+        const sources = $app.findRecordsByFilter(
+            "sources",
+            "network = {:networkId} && status = 'active'",
+            "-updated",
+            0,
+            0,
+            { networkId: networkId }
+        );
+
+        return e.json(200, sources);
     } catch (error) {
         console.log("Sources API error:", error);
         return e.json(500, { error: "Failed to fetch sources data" });

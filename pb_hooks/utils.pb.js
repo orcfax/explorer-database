@@ -62,7 +62,7 @@ const dbUtils = {
 
     // Build asset object from expanded record
     buildAssetObject: (expandedAsset) => {
-        if (!expandedAsset) return null;
+        if (!expandedAsset) return undefined; // Return undefined instead of null for optional Zod fields
 
         return {
             id: expandedAsset.id,
@@ -80,7 +80,10 @@ const dbUtils = {
     buildFeedObject: (expandedFeed) => {
         if (!expandedFeed) return null;
 
-        return {
+        const baseAsset = dbUtils.buildAssetObject(expandedFeed.expandedOne("base_asset"));
+        const quoteAsset = dbUtils.buildAssetObject(expandedFeed.expandedOne("quote_asset"));
+
+        const feedObject = {
             id: expandedFeed.id,
             feed_id: expandedFeed.get("feed_id"),
             network: expandedFeed.get("network"),
@@ -94,9 +97,17 @@ const dbUtils = {
             calculation_method: expandedFeed.get("calculation_method"),
             heartbeat_interval: expandedFeed.get("heartbeat_interval"),
             deviation: expandedFeed.get("deviation"),
-            base_asset: dbUtils.buildAssetObject(expandedFeed.expandedOne("base_asset")),
-            quote_asset: dbUtils.buildAssetObject(expandedFeed.expandedOne("quote_asset")),
         };
+
+        // Only add asset fields if they exist (for optional Zod fields)
+        if (baseAsset) {
+            feedObject.base_asset = baseAsset;
+        }
+        if (quoteAsset) {
+            feedObject.quote_asset = quoteAsset;
+        }
+
+        return feedObject;
     },
 
     // Build fact object from record

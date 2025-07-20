@@ -2,37 +2,67 @@
 
 // Custom API endpoint for dashboard data
 routerAdd("GET", "/api/explorer/dashboard/{networkId}", (e) => {
+    const { RssModel, NodeModel, SourceModel } = require(`${__hooks}/models.pb.js`);
     const networkId = e.request.pathValue("networkId");
 
     try {
         // Compute dashboard stats
         const today = new Date().toISOString().split("T")[0];
 
-        // Get all counts efficiently
-        const totalFacts = $app.countRecords(
-            "facts",
-            $dbx.exp(`network = {:networkId}`, { networkId: networkId })
-        );
-        const totalFacts24Hour = $app.countRecords(
-            "facts",
-            $dbx.and(
-                $dbx.exp(`network = {:networkId}`, { networkId: networkId }),
-                $dbx.exp(`publication_date >= "{:today} 00:00:00.000Z"`, { today: today })
-            )
-        );
-        const totalActiveFeeds = $app.countRecords(
-            "feeds",
-            $dbx.hashExp({ network: networkId, status: "active" })
-        );
-        const activeIncidents = $app.countRecords(
-            "rss",
-            $dbx.and(
-                $dbx.exp(`type = "incident_reports"`, {}),
-                $dbx.exp(`status != "resolved"`, {})
-            )
-        );
+        // OPTIMIZED: Get all counts efficiently using Query Builder
+        const totalFactsResult = arrayOf(new DynamicModel({ count: 0 }));
+        $app.db()
+            .select("COUNT(*) as count")
+            .from("Facts")
+            .where($dbx.exp("network = {:networkId}", { networkId }))
+            .all(totalFactsResult);
+        const totalFacts = totalFactsResult.length > 0 ? totalFactsResult[0].count : 0;
 
-        // Get latest network update
+        const totalFacts24HourResult = arrayOf(new DynamicModel({ count: 0 }));
+        $app.db()
+            .select("COUNT(*) as count")
+            .from("Facts")
+            .where(
+                $dbx.and(
+                    $dbx.exp("network = {:networkId}", { networkId }),
+                    $dbx.exp("publication_date >= {:todayStart}", {
+                        todayStart: `${today} 00:00:00.000Z`,
+                    })
+                )
+            )
+            .all(totalFacts24HourResult);
+        const totalFacts24Hour =
+            totalFacts24HourResult.length > 0 ? totalFacts24HourResult[0].count : 0;
+
+        const totalActiveFeedsResult = arrayOf(new DynamicModel({ count: 0 }));
+        $app.db()
+            .select("COUNT(*) as count")
+            .from("Feeds")
+            .where(
+                $dbx.and(
+                    $dbx.exp("network = {:networkId}", { networkId }),
+                    $dbx.exp("status = 'active'", {})
+                )
+            )
+            .all(totalActiveFeedsResult);
+        const totalActiveFeeds =
+            totalActiveFeedsResult.length > 0 ? totalActiveFeedsResult[0].count : 0;
+
+        const activeIncidentsResult = arrayOf(new DynamicModel({ count: 0 }));
+        $app.db()
+            .select("COUNT(*) as count")
+            .from("Rss")
+            .where(
+                $dbx.and(
+                    $dbx.exp("type = 'incident_reports'", {}),
+                    $dbx.exp("status != 'resolved'", {})
+                )
+            )
+            .all(activeIncidentsResult);
+        const activeIncidents =
+            activeIncidentsResult.length > 0 ? activeIncidentsResult[0].count : 0;
+
+        // Get latest network update using Query Builder
         function processBlogDescription(description) {
             // Remove leading figure and image tags
             let processed = description.replace(/^<figure>.*?<\/figure>/, "");
@@ -43,55 +73,65 @@ routerAdd("GET", "/api/explorer/dashboard/{networkId}", (e) => {
             return firstParagraph ? firstParagraph[0] : processed;
         }
 
-        const rssRecords = $app.findRecordsByFilter("rss", "", "-publish_date", 1, 1, {});
+        const rssRecords = arrayOf(new DynamicModel(RssModel));
+
+        $app.db().select("*").from("Rss").orderBy("publish_date DESC").limit(1).all(rssRecords);
+
         const latestNetworkUpdate =
             rssRecords.length > 0
                 ? {
                       id: rssRecords[0].id,
-                      title: rssRecords[0].get("title"),
-                      type: rssRecords[0].get("type"),
+                      title: rssRecords[0].title,
+                      type: rssRecords[0].type,
                       description:
-                          rssRecords[0].get("type") === "blog_posts"
-                              ? processBlogDescription(rssRecords[0].get("description"))
-                              : rssRecords[0].get("description"),
-                      link: rssRecords[0].get("link"),
-                      publish_date: rssRecords[0].get("publish_date"),
-                      status: rssRecords[0].get("status"),
+                          rssRecords[0].type === "blog_posts"
+                              ? processBlogDescription(rssRecords[0].description)
+                              : rssRecords[0].description,
+                      link: rssRecords[0].link,
+                      publish_date: rssRecords[0].publish_date,
+                      status: rssRecords[0].status,
                   }
                 : null;
 
-        // Get all nodes for the network
-        const nodes = $app.findRecordsByFilter(
-            "nodes",
-            `network = {:networkId}`,
-            "-updated",
-            0,
-            0,
-            { networkId: networkId }
-        );
+        // OPTIMIZED: Get all nodes for the network using Query Builder
+        const nodes = arrayOf(new DynamicModel(NodeModel));
+
+        $app.db()
+            .select("id", "node_urn", "network", "status", "type", "name")
+            .from("Nodes")
+            .where($dbx.exp("network = {:networkId}", { networkId }))
+            .orderBy("updated DESC")
+            .all(nodes);
+
         const nodesData = nodes.map((node) => ({
             id: node.id,
-            node_urn: node.get("node_urn"),
-            network: node.get("network"),
-            status: node.get("status"),
-            type: node.get("type"),
-            name: node.get("name"),
+            node_urn: node.node_urn,
+            network: node.network,
+            status: node.status,
+            type: node.type,
+            name: node.name,
         }));
 
-        // Get all sources for the network
-        const sources = $app.findRecordsByFilter(
-            "sources",
-            `network = {:networkId} && status = "active"`,
-            "-updated",
-            0,
-            0,
-            { networkId: networkId }
-        );
+        // OPTIMIZED: Get all active sources for the network using Query Builder
+        const sources = arrayOf(new DynamicModel(SourceModel));
+
+        $app.db()
+            .select("id", "name", "network", "type")
+            .from("Sources")
+            .where(
+                $dbx.and(
+                    $dbx.exp("network = {:networkId}", { networkId }),
+                    $dbx.exp("status = 'active'", {})
+                )
+            )
+            .orderBy("updated DESC")
+            .all(sources);
+
         const sourcesData = sources.map((source) => ({
             id: source.id,
-            name: source.get("name"),
-            network: source.get("network"),
-            type: source.get("type"),
+            name: source.name,
+            network: source.network,
+            type: source.type,
         }));
 
         return e.json(200, {

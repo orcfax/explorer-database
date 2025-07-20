@@ -2,101 +2,213 @@
 
 // Custom API endpoint for getting paginated facts
 routerAdd("GET", "/api/explorer/facts/{networkId}", (e) => {
-    const { dbUtils } = require(`${__hooks}/utils.pb.js`);
+    const { FactWithJoinedFeedModel, NodeModel } = require(`${__hooks}/models.pb.js`);
     const networkId = e.request.pathValue("networkId");
     const page = parseInt(e.request.url.query().get("page") || "1");
-    const feedId = e.request.url.query().get("feedId");
+    const feedId = e.request.url.query().get("feedId") || null;
     const limit = 5;
+    const offset = (page - 1) * limit;
 
     try {
-        const facts = $app.findRecordsByFilter(
-            "facts",
-            `network = {:networkId} ${feedId ? `&& feed = {:feedId}` : ""}`,
-            "-validation_date",
-            page,
-            limit,
-            { networkId: networkId, feedId: feedId }
-        );
+        const facts = arrayOf(new DynamicModel(FactWithJoinedFeedModel));
 
-        const totalFacts = $app.countRecords(
-            "facts",
-            $dbx.and(
-                $dbx.exp(`network = {:networkId}`, {
-                    networkId: networkId,
-                }),
-                feedId ? $dbx.exp(`feed = {:feedId}`, { feedId: feedId }) : null
+        // Get facts with all related data - using Query Builder
+        let factsQuery = $app
+            .db()
+            .select(
+                "f.*",
+                "fd.id as feed_internal_id",
+                "fd.network as feed_network",
+                "fd.feed_id as feed_identifier",
+                "fd.type as feed_type",
+                "fd.name as feed_name",
+                "fd.version",
+                "fd.status as feed_status",
+                "fd.inactive_reason",
+                "fd.source_type",
+                "fd.funding_type",
+                "fd.calculation_method",
+                "fd.heartbeat_interval",
+                "fd.deviation",
+                "fd.base_asset",
+                "fd.quote_asset",
+                "ba.id as ba_id",
+                "ba.ticker as ba_ticker",
+                "ba.name as ba_name",
+                "ba.type as ba_type",
+                "ba.website as ba_website",
+                "ba.fingerprint as ba_fingerprint",
+                "ba.image_path as ba_image_path",
+                "ba.background_color as ba_background_color",
+                "ba.hasXerberusRiskRating as ba_hasXerberusRiskRating",
+                "qa.id as qa_id",
+                "qa.ticker as qa_ticker",
+                "qa.name as qa_name",
+                "qa.type as qa_type",
+                "qa.website as qa_website",
+                "qa.fingerprint as qa_fingerprint",
+                "qa.image_path as qa_image_path",
+                "qa.background_color as qa_background_color",
+                "qa.hasXerberusRiskRating as qa_hasXerberusRiskRating"
             )
+            .from("Facts f")
+            .innerJoin("Feeds fd", $dbx.exp("f.feed = fd.id"))
+            .leftJoin("Assets ba", $dbx.exp("fd.base_asset = ba.id"))
+            .leftJoin("Assets qa", $dbx.exp("fd.quote_asset = qa.id"))
+            .where($dbx.exp("f.network = {:networkId}", { networkId }))
+            .orderBy("f.validation_date DESC")
+            .limit(limit)
+            .offset(offset);
+
+        // Handle optional feedId filter
+        if (feedId) {
+            factsQuery = factsQuery.andWhere($dbx.exp("fd.feed_id = {:feedId}", { feedId }));
+        }
+
+        factsQuery.all(facts);
+
+        const counts = arrayOf(
+            new DynamicModel({
+                totalCount: 0,
+                totalPages: 0,
+            })
         );
-        const totalPages = Math.ceil(totalFacts / limit);
 
-        const factsWithFeeds = [];
+        // Count query - using Query Builder
+        let countQuery = $app
+            .db()
+            .select("COUNT(*) AS totalCount")
+            .from("Facts f")
+            .innerJoin("Feeds fd", $dbx.exp("f.feed = fd.id"))
+            .where($dbx.exp("f.network = {:networkId}", { networkId }));
 
-        for (let i = 0; i < facts.length; i++) {
-            const fact = facts[i];
+        // Handle optional feedId filter for count query
+        if (feedId) {
+            countQuery = countQuery.andWhere($dbx.exp("fd.feed_id = {:feedId}", { feedId }));
+        }
 
-            // Get the feed for this fact
-            const feedRecord = $app.findRecordById("feeds", fact.get("feed"));
-            $app.expandRecord(feedRecord, ["base_asset", "quote_asset"], null);
+        countQuery.all(counts);
 
-            // Get participating nodes if any
-            const participatingNodeIds = fact.get("participating_nodes") || [];
-            let participatingNodes = [];
-            if (participatingNodeIds.length > 0) {
-                participatingNodes = participatingNodeIds
-                    .map((nodeId) => {
-                        try {
-                            const node = $app.findRecordById("nodes", nodeId);
-                            return {
-                                id: node.id,
-                                node_urn: node.get("node_urn"),
-                                network: node.get("network"),
-                                status: node.get("status"),
-                                type: node.get("type"),
-                                name: node.get("name"),
-                                address_locality: node.get("address_locality"),
-                                address_region: node.get("address_region"),
-                                geo_coordinates: node.get("geo_coordinates"),
-                            };
-                        } catch (e) {
-                            return null;
-                        }
-                    })
-                    .filter((node) => node !== null);
-            }
+        // Calculate totalPages
+        const totalCount = counts[0].totalCount;
+        const totalPages = Math.ceil(totalCount / limit);
 
-            const feedWithAssets = dbUtils.buildFeedObject(feedRecord);
+        // Get all unique participating node IDs and fetch nodes
+        const allNodeIds = facts.flatMap((fact) => fact.participating_nodes || []);
+        const uniqueNodeIds = [...new Set(allNodeIds)];
 
-            factsWithFeeds.push({
-                id: fact.id,
-                network: fact.get("network"),
-                policy: fact.get("policy"),
-                fact_urn: fact.get("fact_urn"),
-                feed: feedWithAssets,
-                value: fact.get("value"),
-                value_inverse: fact.get("value_inverse"),
-                validation_date: fact.get("validation_date"),
-                publication_date: fact.get("publication_date"),
-                transaction_id: fact.get("transaction_id"),
-                storage_urn: fact.get("storage_urn"),
-                block_hash: fact.get("block_hash"),
-                output_index: fact.get("output_index"),
-                address: fact.get("address"),
-                slot: fact.get("slot"),
-                statement_hash: fact.get("statement_hash"),
-                publication_cost: fact.get("publication_cost"),
-                participating_nodes: participatingNodes,
-                storage_cost: fact.get("storage_cost"),
-                sources: fact.get("sources") || [],
-                content_signature: fact.get("content_signature"),
-                collection_date: fact.get("collection_date"),
-                is_archive_indexed: fact.get("is_archive_indexed"),
+        let nodesMap = {};
+        if (uniqueNodeIds.length > 0) {
+            const nodes = arrayOf(new DynamicModel(NodeModel));
+
+            $app.db()
+                .select("*")
+                .from("nodes")
+                .where($dbx.in("id", ...uniqueNodeIds))
+                .all(nodes);
+
+            nodes.forEach((node) => {
+                nodesMap[node.id] = {
+                    id: node.id,
+                    node_urn: node.node_urn,
+                    network: node.network,
+                    status: node.status,
+                    type: node.type,
+                    name: node.name,
+                    address_locality: node.address_locality,
+                    address_region: node.address_region,
+                    geo_coordinates: node.geo_coordinates,
+                };
             });
         }
 
+        // Build response data
+        const factsWithFullData = facts.map((fact) => {
+            // Build base asset object (uses ba_ prefixed fields)
+            const baseAsset = fact.base_asset
+                ? {
+                      id: fact.ba_id,
+                      ticker: fact.ba_ticker,
+                      name: fact.ba_name,
+                      type: fact.ba_type,
+                      website: fact.ba_website,
+                      fingerprint: fact.ba_fingerprint,
+                      image_path: fact.ba_image_path,
+                      background_color: fact.ba_background_color,
+                      hasXerberusRiskRating: fact.ba_hasXerberusRiskRating,
+                  }
+                : undefined;
+
+            // Build quote asset object (uses qa_ prefixed fields)
+            const quoteAsset = fact.quote_asset
+                ? {
+                      id: fact.qa_id,
+                      ticker: fact.qa_ticker,
+                      name: fact.qa_name,
+                      type: fact.qa_type,
+                      website: fact.qa_website,
+                      fingerprint: fact.qa_fingerprint,
+                      image_path: fact.qa_image_path,
+                      background_color: fact.qa_background_color,
+                      hasXerberusRiskRating: fact.qa_hasXerberusRiskRating,
+                  }
+                : undefined;
+
+            // Build feed object
+            const feed = {
+                id: fact.feed_internal_id,
+                network: fact.feed_network,
+                feed_id: fact.feed_identifier,
+                type: fact.feed_type,
+                name: fact.feed_name,
+                version: fact.version,
+                status: fact.feed_status,
+                inactive_reason: fact.inactive_reason,
+                source_type: fact.source_type,
+                funding_type: fact.funding_type,
+                calculation_method: fact.calculation_method,
+                heartbeat_interval: fact.heartbeat_interval,
+                deviation: fact.deviation,
+                base_asset: baseAsset,
+                quote_asset: quoteAsset,
+            };
+
+            // Build participating nodes
+            const participatingNodes = (fact.participating_nodes || [])
+                .map((nodeId) => nodesMap[nodeId])
+                .filter(Boolean);
+
+            return {
+                id: fact.id,
+                network: fact.network,
+                policy: fact.policy,
+                fact_urn: fact.fact_urn,
+                feed: feed,
+                value: fact.value,
+                value_inverse: fact.value_inverse,
+                validation_date: fact.validation_date,
+                publication_date: fact.publication_date,
+                transaction_id: fact.transaction_id,
+                storage_urn: fact.storage_urn,
+                block_hash: fact.block_hash,
+                output_index: fact.output_index,
+                address: fact.address,
+                slot: fact.slot,
+                statement_hash: fact.statement_hash,
+                publication_cost: fact.publication_cost,
+                participating_nodes: participatingNodes,
+                storage_cost: fact.storage_cost,
+                sources: fact.sources || [],
+                content_signature: fact.content_signature,
+                collection_date: fact.collection_date,
+                is_archive_indexed: fact.is_archive_indexed,
+            };
+        });
+
         return e.json(200, {
-            facts: factsWithFeeds,
+            facts: factsWithFullData,
             totalPages: totalPages,
-            totalFacts: totalFacts,
+            totalFacts: totalCount,
         });
     } catch (error) {
         console.log("Facts API error:", error);
@@ -112,18 +224,65 @@ routerAdd("GET", "/api/explorer/facts/{networkId}/{factUrn}", (e) => {
     const feedId = e.request.url.query().get("feedId");
 
     try {
-        const facts = $app.findRecordsByFilter(
-            "facts",
-            `fact_urn = {:factUrn} && network = {:networkId} ${feedId ? `&& feed = {:feedId}` : ""}`,
-            "-validation_date",
-            1,
-            1,
-            {
-                factUrn: factUrn,
-                networkId: networkId,
-                feedId: feedId,
-            }
-        );
+        const facts = arrayOf(new DynamicModel(FactWithJoinedFeedModel));
+
+        // Get fact with all related data - using Query Builder
+        let factQuery = $app
+            .db()
+            .select(
+                "f.*",
+                "fd.id as feed_internal_id",
+                "fd.network as feed_network",
+                "fd.feed_id as feed_identifier",
+                "fd.type as feed_type",
+                "fd.name as feed_name",
+                "fd.version",
+                "fd.status as feed_status",
+                "fd.inactive_reason",
+                "fd.source_type",
+                "fd.funding_type",
+                "fd.calculation_method",
+                "fd.heartbeat_interval",
+                "fd.deviation",
+                "fd.base_asset",
+                "fd.quote_asset",
+                "ba.id as ba_id",
+                "ba.ticker as ba_ticker",
+                "ba.name as ba_name",
+                "ba.type as ba_type",
+                "ba.website as ba_website",
+                "ba.fingerprint as ba_fingerprint",
+                "ba.image_path as ba_image_path",
+                "ba.background_color as ba_background_color",
+                "ba.hasXerberusRiskRating as ba_hasXerberusRiskRating",
+                "qa.id as qa_id",
+                "qa.ticker as qa_ticker",
+                "qa.name as qa_name",
+                "qa.type as qa_type",
+                "qa.website as qa_website",
+                "qa.fingerprint as qa_fingerprint",
+                "qa.image_path as qa_image_path",
+                "qa.background_color as qa_background_color",
+                "qa.hasXerberusRiskRating as qa_hasXerberusRiskRating"
+            )
+            .from("Facts f")
+            .innerJoin("Feeds fd", $dbx.exp("f.feed = fd.id"))
+            .leftJoin("Assets ba", $dbx.exp("fd.base_asset = ba.id"))
+            .leftJoin("Assets qa", $dbx.exp("fd.quote_asset = qa.id"))
+            .where(
+                $dbx.exp("f.network = {:networkId} AND f.fact_urn = {:factUrn}", {
+                    networkId,
+                    factUrn,
+                })
+            )
+            .limit(1);
+
+        // Handle optional feedId filter
+        if (feedId) {
+            factQuery = factQuery.andWhere($dbx.exp("fd.feed_id = {:feedId}", { feedId }));
+        }
+
+        factQuery.all(facts);
 
         if (facts.length === 0) {
             return e.json(404, { error: "Fact not found" });
@@ -131,36 +290,111 @@ routerAdd("GET", "/api/explorer/facts/{networkId}/{factUrn}", (e) => {
 
         const fact = facts[0];
 
-        // Get the feed for this fact
-        const feedRecord = $app.findRecordById("feeds", fact.get("feed"));
-        $app.expandRecord(feedRecord, ["base_asset", "quote_asset"], null);
+        // Get participating nodes data
+        let nodesMap = {};
+        const participatingNodeIds = fact.participating_nodes || [];
+        if (participatingNodeIds.length > 0) {
+            const nodes = arrayOf(new DynamicModel(NodeModel));
 
-        const feedWithAssets = dbUtils.buildFeedObject(feedRecord);
+            $app.db()
+                .select("*")
+                .from("nodes")
+                .where($dbx.in("id", ...participatingNodeIds))
+                .all(nodes);
+
+            nodes.forEach((node) => {
+                nodesMap[node.id] = {
+                    id: node.id,
+                    node_urn: node.node_urn,
+                    network: node.network,
+                    status: node.status,
+                    type: node.type,
+                    name: node.name,
+                    address_locality: node.address_locality,
+                    address_region: node.address_region,
+                    geo_coordinates: node.geo_coordinates,
+                };
+            });
+        }
+
+        // Build base asset object (uses ba_ prefixed fields)
+        const baseAsset = fact.base_asset
+            ? {
+                  id: fact.ba_id,
+                  ticker: fact.ba_ticker,
+                  name: fact.ba_name,
+                  type: fact.ba_type,
+                  website: fact.ba_website,
+                  fingerprint: fact.ba_fingerprint,
+                  image_path: fact.ba_image_path,
+                  background_color: fact.ba_background_color,
+                  hasXerberusRiskRating: fact.ba_hasXerberusRiskRating,
+              }
+            : undefined;
+
+        // Build quote asset object (uses qa_ prefixed fields)
+        const quoteAsset = fact.quote_asset
+            ? {
+                  id: fact.qa_id,
+                  ticker: fact.qa_ticker,
+                  name: fact.qa_name,
+                  type: fact.qa_type,
+                  website: fact.qa_website,
+                  fingerprint: fact.qa_fingerprint,
+                  image_path: fact.qa_image_path,
+                  background_color: fact.qa_background_color,
+                  hasXerberusRiskRating: fact.qa_hasXerberusRiskRating,
+              }
+            : undefined;
+
+        // Build feed object
+        const feed = {
+            id: fact.feed_internal_id,
+            network: fact.feed_network,
+            feed_id: fact.feed_identifier,
+            type: fact.feed_type,
+            name: fact.feed_name,
+            version: fact.version,
+            status: fact.feed_status,
+            inactive_reason: fact.inactive_reason,
+            source_type: fact.source_type,
+            funding_type: fact.funding_type,
+            calculation_method: fact.calculation_method,
+            heartbeat_interval: fact.heartbeat_interval,
+            deviation: fact.deviation,
+            base_asset: baseAsset,
+            quote_asset: quoteAsset,
+        };
+
+        // Build participating nodes
+        const participatingNodes = (fact.participating_nodes || [])
+            .map((nodeId) => nodesMap[nodeId])
+            .filter(Boolean);
 
         const factWithFeed = {
             id: fact.id,
-            network: fact.get("network"),
-            policy: fact.get("policy"),
-            fact_urn: fact.get("fact_urn"),
-            feed: feedWithAssets,
-            value: fact.get("value"),
-            value_inverse: fact.get("value_inverse"),
-            validation_date: fact.get("validation_date"),
-            publication_date: fact.get("publication_date"),
-            transaction_id: fact.get("transaction_id"),
-            storage_urn: fact.get("storage_urn"),
-            block_hash: fact.get("block_hash"),
-            output_index: fact.get("output_index"),
-            address: fact.get("address"),
-            slot: fact.get("slot"),
-            statement_hash: fact.get("statement_hash"),
-            publication_cost: fact.get("publication_cost"),
-            participating_nodes: fact.get("participating_nodes") || [],
-            storage_cost: fact.get("storage_cost"),
-            sources: fact.get("sources") || [],
-            content_signature: fact.get("content_signature"),
-            collection_date: fact.get("collection_date"),
-            is_archive_indexed: fact.get("is_archive_indexed"),
+            network: fact.network,
+            policy: fact.policy,
+            fact_urn: fact.fact_urn,
+            feed: feed,
+            value: fact.value,
+            value_inverse: fact.value_inverse,
+            validation_date: fact.validation_date,
+            publication_date: fact.publication_date,
+            transaction_id: fact.transaction_id,
+            storage_urn: fact.storage_urn,
+            block_hash: fact.block_hash,
+            output_index: fact.output_index,
+            address: fact.address,
+            slot: fact.slot,
+            statement_hash: fact.statement_hash,
+            publication_cost: fact.publication_cost,
+            participating_nodes: participatingNodes,
+            storage_cost: fact.storage_cost,
+            sources: fact.sources || [],
+            content_signature: fact.content_signature,
+            collection_date: fact.collection_date,
+            is_archive_indexed: fact.is_archive_indexed,
         };
 
         return e.json(200, factWithFeed);
