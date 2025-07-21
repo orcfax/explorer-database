@@ -23,11 +23,11 @@ routerAdd("GET", "/api/explorer/sources-with-metadata/{networkId}", (e) => {
             // Get fact metadata for this source
             const facts = $app.findRecordsByFilter(
                 "facts",
-                `network = {:networkId} && sources ~ "${source.id}"`,
+                `network = {:networkId} && sources ~ {:sourceId}`,
                 "-validation_date",
                 1,
                 1,
-                { networkId: networkId }
+                { networkId: networkId, sourceId: source.id }
             );
 
             const totalFacts = $app.countRecords(
