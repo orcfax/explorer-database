@@ -21,6 +21,7 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}", (e) => {
                 "ba.fingerprint as ba_fingerprint",
                 "ba.image_path as ba_image_path",
                 "ba.background_color as ba_background_color",
+                "ba.hasXerberusRiskRating as ba_hasXerberusRiskRating",
                 "qa.id as qa_id",
                 "qa.ticker as qa_ticker",
                 "qa.name as qa_name",
@@ -28,7 +29,8 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}", (e) => {
                 "qa.website as qa_website",
                 "qa.fingerprint as qa_fingerprint",
                 "qa.image_path as qa_image_path",
-                "qa.background_color as qa_background_color"
+                "qa.background_color as qa_background_color",
+                "qa.hasXerberusRiskRating as qa_hasXerberusRiskRating"
             )
             .from("Feeds f")
             .leftJoin("Assets ba", $dbx.exp("f.base_asset = ba.id"))
@@ -168,6 +170,7 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}", (e) => {
                       fingerprint: feed.ba_fingerprint,
                       image_path: feed.ba_image_path,
                       background_color: feed.ba_background_color,
+                      hasXerberusRiskRating: feed.ba_hasXerberusRiskRating,
                   }
                 : null;
 
@@ -182,6 +185,7 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}", (e) => {
                       fingerprint: feed.qa_fingerprint,
                       image_path: feed.qa_image_path,
                       background_color: feed.qa_background_color,
+                      hasXerberusRiskRating: feed.qa_hasXerberusRiskRating,
                   }
                 : null;
 
@@ -301,6 +305,7 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}/{feedId}", (e) => {
                 ba_fingerprint: "",
                 ba_image_path: "",
                 ba_background_color: "",
+                ba_hasXerberusRiskRating: false,
 
                 // Quote asset fields (qa_ prefixed)
                 qa_id: "",
@@ -311,6 +316,7 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}/{feedId}", (e) => {
                 qa_fingerprint: "",
                 qa_image_path: "",
                 qa_background_color: "",
+                qa_hasXerberusRiskRating: false,
             })
         );
 
@@ -326,6 +332,7 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}/{feedId}", (e) => {
                 "ba.fingerprint as ba_fingerprint",
                 "ba.image_path as ba_image_path",
                 "ba.background_color as ba_background_color",
+                "ba.hasXerberusRiskRating as ba_hasXerberusRiskRating",
                 "qa.id as qa_id",
                 "qa.ticker as qa_ticker",
                 "qa.name as qa_name",
@@ -333,7 +340,8 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}/{feedId}", (e) => {
                 "qa.website as qa_website",
                 "qa.fingerprint as qa_fingerprint",
                 "qa.image_path as qa_image_path",
-                "qa.background_color as qa_background_color"
+                "qa.background_color as qa_background_color",
+                "qa.hasXerberusRiskRating as qa_hasXerberusRiskRating"
             )
             .from("Feeds f")
             .leftJoin("Assets ba", $dbx.exp("f.base_asset = ba.id"))
@@ -476,6 +484,7 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}/{feedId}", (e) => {
                   fingerprint: feed.ba_fingerprint,
                   image_path: feed.ba_image_path,
                   background_color: feed.ba_background_color,
+                  hasXerberusRiskRating: feed.ba_hasXerberusRiskRating,
               }
             : null;
 
@@ -490,6 +499,7 @@ routerAdd("GET", "/api/explorer/feeds/{networkId}/{feedId}", (e) => {
                   fingerprint: feed.qa_fingerprint,
                   image_path: feed.qa_image_path,
                   background_color: feed.qa_background_color,
+                  hasXerberusRiskRating: feed.qa_hasXerberusRiskRating,
               }
             : null;
 

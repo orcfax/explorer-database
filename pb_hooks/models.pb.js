@@ -127,6 +127,7 @@ const FeedWithAssetsModel = {
     ba_fingerprint: "",
     ba_image_path: "",
     ba_background_color: "",
+    ba_hasXerberusRiskRating: false,
 
     // Quote asset fields (qa_ prefixed)
     qa_id: "",
@@ -137,6 +138,7 @@ const FeedWithAssetsModel = {
     qa_fingerprint: "",
     qa_image_path: "",
     qa_background_color: "",
+    qa_hasXerberusRiskRating: false,
 };
 
 const NodeModel = {
